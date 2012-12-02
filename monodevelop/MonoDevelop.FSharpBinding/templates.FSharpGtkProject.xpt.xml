@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<Template originator="Ihor Sihuta" created="2012/08/05">
+
+	<TemplateConfiguration>
+		<_Name>F# 3.0 Desktop Application (Gtk# 2.0)</_Name>
+		<_Description>Create an F# 3.0 desktop application (using Gtk# 2.0 and .NET 4.0). Note: you may have to manually set the target framework after creating the project. This is a known bug.</_Description>
+		<_Category>F#</_Category>
+		<LanguageName>F#</LanguageName>
+	</TemplateConfiguration>
+	
+	<Actions>
+		<Open filename="Main.fs" />
+	</Actions>
+	
+	<Combine name="${ProjectName}" directory=".">
+		<Options>
+			<StartupProject>${ProjectName}</StartupProject>
+		</Options>
+
+		<Project name = "${ProjectName}" directory = ".">
+			<Options Target = "WinExe" TargetFrameworkVersion="4.0" />
+
+			<References>
+        <Reference type="Package" refto="mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+        <Reference type="Gac" refto="FSharp.Core, Version=4.3.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
+				<Reference type="Package" refto="System, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+        <Reference type="Package" refto="System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+				<Reference type="Package" SpecificVersion="false" refto="gtk-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+				<Reference type="Package" SpecificVersion="false" refto="gdk-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+				<Reference type="Package" SpecificVersion="false" refto="glib-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+				<Reference type="Package" SpecificVersion="false" refto="glade-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+				<Reference type="Package" SpecificVersion="false" refto="pango-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+				<Reference type="Package" SpecificVersion="false" refto="atk-sharp, Version=2.4.0.0, Culture=neutral, PublicKeyToken=35e10195dab3c99f" />
+			</References>
+
+			<Files>
+
+			<!-- A window template -->
+
+				<FileTemplateReference TemplateID="FSharpAssemblyInfo" name="AssemblyInfo.fs" />
+				<Widget>
+					<SteticTemplate>
+					  <widget class="Gtk.Window" id="MainWindow" design-size="400 300">
+					    <property name="Title" translatable="yes">${Name}</property>
+					    <property name="WindowPosition">CenterOnParent</property>
+					    <signal name="DeleteEvent" handler="OnDeleteEvent" />
+				            <child>
+				              <placeholder />
+				            </child>
+					  </widget>			
+					</SteticTemplate>
+
+					<!-- Class bound to the window -->
+
+			                <File name="MainWindow.fs">
+<![CDATA[
+// NOTE: If warnings appear, you may need to retarget this project to .NET 4.0. Show the Solution
+// Pad, right-click on the project node, choose 'Options --> Build --> General' and change the target
+// framework to .NET 4.0 or .NET 4.5.
+
+namespace ${ProjectName}
+
+    module MainWindow =
+    
+        open System
+        open Gtk;
+
+        type MyWindow() as this =
+            inherit Window("MainWindow")
+            
+            do this.SetDefaultSize(400,300)
+            do this.DeleteEvent.AddHandler(fun o e -> this.OnDeleteEvent(o,e))
+            do this.ShowAll()
+            
+            member this.OnDeleteEvent(o,e:DeleteEventArgs) = 
+                Application.Quit ()
+                e.RetVal <- true]]>
+				</File>
+             
+                            </Widget>
+             <File name="Main.fs">
+                <![CDATA[namespace ${ProjectName}
+    module Main =
+        
+        open System
+        open Gtk
+    
+        [<EntryPoint>]
+        let Main(args) = 
+            Application.Init()
+            let win = new MainWindow.MyWindow()
+            win.Show()
+            Application.Run()
+            0
+]]>
+             </File>
+			</Files>
+		</Project>
+	</Combine>
+</Template>
+
