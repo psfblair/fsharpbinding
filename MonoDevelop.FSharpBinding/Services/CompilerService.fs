@@ -22,9 +22,6 @@ open Microsoft.FSharp.Compiler.CodeDom
 
 /// Functions that implement compilation, parsing, etc..
 module CompilerService = 
-  let private regParseFsOutput = Regex(@"(?<file>[^\(]*)\((?<line>[0-9]*),(?<col>[0-9]*)\):\s(?<type>[^:]*)\s(?<err>[^:]*):\s(?<msg>.*)", RegexOptions.Compiled);
-  let private regParseFsOutputNoNum = Regex(@"(?<file>[^\(]*)\((?<line>[0-9]*),(?<col>[0-9]*)\):\s(?<type>[^:]*)\s(?<msg>.*)", RegexOptions.Compiled);
-
 
   /// Generate various command line arguments for the project
   let private generateCmdArgs (config:DotNetProjectConfiguration) items configSel = 
@@ -34,33 +31,57 @@ module CompilerService =
       | CompileTarget.WinExe   -> yield "--target:winexe"
       | (*CompileTarget.Exe*)_ -> yield "--target:exe"
     
-      if config.SignAssembly then yield "--keyfile:" + Common.wrapFile config.AssemblyKeyFile
-      yield "--out:" + Common.wrapFile (config.CompiledOutputName.ToString())
+      if config.SignAssembly then yield "--keyfile:" + CompilerArguments.wrapFile config.AssemblyKeyFile
+      yield "--out:" + CompilerArguments.wrapFile (config.CompiledOutputName.ToString())
     
       // Generate compiler options based on F# specific project settings
       let fsconfig = config.CompilationParameters :?> FSharpCompilerParameters
     
       if not (String.IsNullOrEmpty fsconfig.DocumentationFile) then 
-          yield ("--doc:" + Common.wrapFile fsconfig.DocumentationFile)
+          let docFile = config.CompiledOutputName.ChangeExtension(".xml").ToString() 
+          yield ("--doc:" + CompilerArguments.wrapFile docFile) 
 
       let shouldWrap = true// The compiler argument paths should always be wrapped, since some paths (ie. on Windows) may contain spaces.
-      yield! Common.generateCompilerOptions fsconfig items configSel shouldWrap ]
+      yield! CompilerArguments.generateCompilerOptions (fsconfig, config.TargetFramework.Id, items, configSel, shouldWrap) ]
 
+
+  let private regParseFsOutput = Regex(@"(?<file>[^\(]*)\((?<line>[0-9]*),(?<col>[0-9]*)\):\s(?<type>[^:]*)\s(?<err>[^:]*):\s(?<msg>.*)", RegexOptions.Compiled);
+  let private regParseFsOutputNoNum = Regex(@"(?<file>[^\(]*)\((?<line>[0-9]*),(?<col>[0-9]*)\):\s(?<type>[^:]*)\s(?<msg>.*)", RegexOptions.Compiled);
+  let private regParseFsOutputNoLocation = Regex(@"(?<type>[^:]*)\s(?<err>[^:]*):\s(?<msg>.*)", RegexOptions.Compiled);
 
   /// Process a single message emitted by the F# compiler
   let private processMsg msg = 
-    let m = 
-      let t1 = regParseFsOutput.Match(msg) 
-      if (t1.Success) then t1 else regParseFsOutputNoNum.Match(msg)
-    if (m.Success) then 
-      let errNo = (if (m.Groups.Item("err") <> null) then (m.Groups.Item("err")).Value else "") 
-      let info = 
-        m.Groups.Item("file").Value, Int32.Parse(m.Groups.Item("line").Value), 
-          Int32.Parse(m.Groups.Item("col").Value), errNo, m.Groups.Item("msg").Value
-      let isWarning = ((m.Groups.Item("type")).Value = "warning")
-      (not isWarning), info
-    else 
-      true, ("unknown-file", 0, 0, "0", msg)
+      let m = 
+          let t1 = regParseFsOutput.Match(msg) 
+          if t1.Success then t1 else 
+          let t2 = regParseFsOutputNoNum.Match(msg)
+          if t2.Success then t2 else 
+          regParseFsOutputNoLocation.Match(msg)
+      let get (s:string) = match m.Groups.Item(s) with null -> None | v -> match v.Value with null | "" -> None | x -> Some x
+      if m.Success then 
+          let errNo = match get "err" with None -> "" | Some v -> v
+          let file = match get "file" with None -> "unknown-file"  | Some v -> v
+          let line = match get "line" with None -> 1 | Some v -> printfn "v.Value = <<<%s>>>" v; int32 v
+          let col = match get "col" with None -> 1 | Some v -> int32 v
+          let msg = match get "msg" with None -> "" | Some v -> v
+          let isError = match get "type" with None -> true | Some v -> (v <> "warning")
+          isError, (file, line, col, errNo, msg)
+      else 
+          true, ("unknown-file", 0, 0, "0", msg)
+
+(*
+  processMsg "warning FS0075: The command-line option '--warnon' is for internal use only" 
+      = (false,("unknown-file", 1, 1, "FS0075","The command-line option '--warnon' is for internal use only"))
+
+  processMsg @"C:\test\a.fs(2,17): warning FS0025: Incomplete pattern matches on this expression. For example, the value '0' may indicate a case not covered by the pattern(s)."
+      = (false,(@"C:\test\a.fs", 2, 17, "FS0025","Incomplete pattern matches on this expression. For example, the value '0' may indicate a case not covered by the pattern(s)."))
+    
+  processMsg @"C:\test space\a.fs(2,15): error FS0001: The type 'float' does not match the type 'int'"
+    = (true,(@"C:\test space\a.fs", 2, 15, "FS0001","The type 'float' does not match the type 'int'"))
+
+  processMsg "error FS0082: Could not resolve this reference. Could not locate the assembly \"foo.dll\". Check to make sure the assembly exists on disk. If this reference is required by your code, you may get compilation errors. (Code=MSB3245)"
+    = (true,("unknown-file", 1, 1, "FS0082","Could not resolve this reference. Could not locate the assembly \"foo.dll\". Check to make sure the assembly exists on disk. If this reference is required by your code, you may get compilation errors. (Code=MSB3245)"))
+*)
 
   /// Run the F# compiler with the specified arguments (passed as a list)
   /// and print the arguments to progress monitor (Output in MonoDevelop)
@@ -76,10 +97,10 @@ module CompilerService =
 //    monitor.Log.WriteLine("Default Framework:" + (Common.getDefaultTargetFramework IdeApp.Preferences.DefaultTargetRuntime).Id.ToString())
 
     let br = BuildResult()
-
+    
     // Concatenate arguments & run
     let fscPath =
-      match Common.getCompilerFromEnvironment runtime framework with
+      match CompilerArguments.getCompilerFromEnvironment runtime framework with
       | Some(result) -> Some(result)
       | None -> 
         match PropertyService.Get<string>("FSharpBinding.FscPath","") with
@@ -88,7 +109,7 @@ module CompilerService =
             br.AddWarning("No compiler found for the selected runtime; using default compiler instead.")
           Some(result)
         | _ ->
-          match Common.getDefaultDefaultCompiler() with
+          match CompilerArguments.getDefaultDefaultCompiler() with
           | Some(result) ->
             if runtime.Id <> IdeApp.Preferences.DefaultTargetRuntime.Id then
               br.AddWarning("No compiler found for the selected runtime; using default compiler instead.")
@@ -164,13 +185,14 @@ module CompilerService =
     let args = 
         [ yield! [ "--noframework --nologo" ]
           yield! generateCmdArgs config items configSel  
-          yield! Common.generateOtherItems items 
+          yield! CompilerArguments.generateOtherItems items 
       
           // Generate source files (sort using current configuration)
           let fsconfig = config.ProjectParameters :?> FSharpProjectParameters
-          let files = Common.getSourceFiles items
+          let files = CompilerArguments.getSourceFiles items
           let root = System.IO.Path.GetDirectoryName(config.ProjectParameters.ParentProject.FileName.FullPath.ToString())
-          yield! Common.getItemsInOrder root files fsconfig.BuildOrder false ]
+          for file in CompilerArguments.getItemsInOrder root files fsconfig.BuildOrder false do 
+             yield CompilerArguments.wrapFile file ]
           
     compile runtime framework monitor args
     
